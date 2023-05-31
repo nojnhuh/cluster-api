@@ -19,18 +19,19 @@ package controllers
 
 import (
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/test/infrastructure/container"
 	infrav1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/infrastructure/docker/internal/docker"
@@ -100,6 +101,31 @@ func (r *DockerClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			}
 		}
 	}()
+
+	// Cluster not paused and not blocking => block
+	// Cluster paused and not blocking => no-op, already not blocking
+	// Cluster paused and blocking => do work and unblock
+	// Cluster not paused and blocking => regular reconcile
+	anns := dockerCluster.GetAnnotations()
+	_, moveBlocked := anns[clusterctlv1.MoveBlockedAnnotation]
+	paused := cluster.Spec.Paused
+	if !moveBlocked && !paused {
+		anns[clusterctlv1.MoveBlockedAnnotation] = "y"
+	}
+	if moveBlocked && paused {
+		log.Info("preparing for move")
+		for i := 0; i < 10; i++ {
+			time.Sleep(3 * time.Second)
+			log.Info("doing work")
+		}
+		delete(anns, clusterctlv1.MoveBlockedAnnotation)
+	}
+	dockerCluster.SetAnnotations(anns)
+
+	if cluster.Spec.Paused {
+		log.Info("skipping reconcile for paused owner cluster")
+		return ctrl.Result{}, nil
+	}
 
 	// Support FailureDomains
 	// In cloud providers this would likely look up which failure domains are supported and set the status appropriately.
@@ -203,9 +229,6 @@ func (r *DockerClusterReconciler) SetupWithManager(ctx context.Context, mgr ctrl
 		Watches(
 			&clusterv1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(util.ClusterToInfrastructureMapFunc(ctx, infrav1.GroupVersion.WithKind("DockerCluster"), mgr.GetClient(), &infrav1.DockerCluster{})),
-			builder.WithPredicates(
-				predicates.ClusterUnpaused(ctrl.LoggerFrom(ctx)),
-			),
 		).Complete(r)
 	if err != nil {
 		return errors.Wrap(err, "failed setting up with a controller manager")
