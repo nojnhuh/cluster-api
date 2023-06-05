@@ -30,6 +30,8 @@ to move the Cluster API objects defined in another namespace, you can use the `-
 
 Before moving a `Cluster`, clusterctl sets the `Cluster.Spec.Paused` field to `true` stopping
 the controllers from reconciling the workload cluster _in the source management cluster_.
+clusterctl will then wait for the `clusterctl.cluster.x-k8s.io/move-blocked` annotation not
+to exist on any resource to be moved.
 
 The `Cluster` object created in the target management cluster instead will be actively reconciled as soon as the move
 process completes.

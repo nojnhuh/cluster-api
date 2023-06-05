@@ -31,4 +31,10 @@ const (
 	//
 	// It will help any validation webhook to take decision based on it.
 	DeleteForMoveAnnotation = "clusterctl.cluster.x-k8s.io/delete-for-move"
+
+	// MoveBlockedAnnotation blocks a move when defined with any value on any
+	// object to be moved. Providers are expected to set the annotation on
+	// resources that cannot be instantaneously paused, and remove the
+	// annotation when the resource has been paused.
+	MoveBlockedAnnotation = "clusterctl.cluster.x-k8s.io/move-blocked"
 )
